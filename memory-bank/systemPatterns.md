@@ -12,12 +12,15 @@
     ```
 *   **Key Technical Decisions:**
     *   Utilize the official `openai` Node.js SDK for robust API interaction and future compatibility.
-    *   Implement the skill in plain JavaScript (ES Modules) for simplicity and broad compatibility within the Node environment, avoiding transpilation steps.
+    *   Implement the skill in plain JavaScript as CommonJS module (using `module.exports`) to comply with AnythingLLM's skill loading requirements.
     *   Return image data as base64-encoded strings, adhering to the `handler.js` return type constraint.
     *   Define skill parameters clearly in `plugin.json` to leverage AnythingLLM's ability to guide the LLM's function calls.
+    *   Ensure `plugin.json` includes the required fields: `schema: "skill-1.0.0"`, `version`, `active`, `name`, and `description`.
 *   **Design Patterns:**
-    *   **Singleton:** Potentially use a singleton pattern for the OpenAI client instance within `handler.js` to avoid redundant initializations on multiple calls within the same runtime lifecycle (if applicable to the skill runtime).
-    *   **Adapter:** The `handler.js` acts as an adapter, translating the parameters defined in `plugin.json` (and provided by the LLM) into the specific structure required by the OpenAI SDK methods (`images.generate`, `images.edit`).
+    *   **Singleton:** Implemented a singleton pattern for the OpenAI client instance within `handler.js` to avoid redundant initializations on multiple calls within the same runtime lifecycle.
+    *   **Module Exports Pattern:** Follows the CommonJS pattern required by AnythingLLM, exporting the runtime object with a handler function: `module.exports.runtime = { handler: async function(...) {...} }`.
+    *   **Safe Context Pattern:** Implemented defensive checks for runtime context (e.g., `this.introspect`, `this.logger`) to handle cases where the handler is called without runtime context (such as in unit tests).
+    *   **Adapter:** The `handler.js` acts as an adapter, translating the parameters defined in `plugin.json` (and provided by the LLM) into the specific structure required by the OpenAI SDK methods (`images.generate`, `images.edit`, `images.createVariation`).
     *   **Facade:** The skill itself acts as a facade, simplifying the interaction with the potentially complex OpenAI Image API into a single function call for the AnythingLLM agent.
 *   **Component Interaction:**
     *   The AnythingLLM Agent identifies the user's intent to generate/edit an image.
@@ -32,9 +35,9 @@
 *   **Data Flow:**
     `User Prompt -> Agent -> Skill Invocation (JSON Params) -> handler.js -> OpenAI API Request -> OpenAI API Response (Image Data) -> handler.js (Formats to base64) -> Agent -> User Display`
 *   **Error Handling Strategy:**
-    *   Wrap OpenAI API calls within `try...catch` blocks in `handler.js`.
-    *   Catch errors from the OpenAI SDK (e.g., network issues, authentication errors, invalid requests, rate limits).
-    *   Catch errors from input validation (if implemented, e.g., using zod).
-    *   Format caught errors into user-friendly string messages (e.g., "Error generating image: [OpenAI Error Message]" or "Invalid parameter: [Details]").
-    *   Return the error string as the result from `handler.js`. The AnythingLLM agent should then surface this error to the user.
-    *   Consider implementing basic retries (e.g., 2-3 attempts with exponential backoff) for transient network errors before failing.
+    *   Wrapped OpenAI API calls within `try...catch` blocks in `handler.js`.
+    *   Implemented retries for transient errors (HTTP 5xx status codes and network errors) with exponential backoff.
+    *   Added extensive input validation for all parameters with specific error messages for different failure cases.
+    *   Handled OpenAI SDK errors (e.g., network issues, authentication errors, invalid requests, rate limits).
+    *   Formatted caught errors into user-friendly string messages that can be surfaced by the AnythingLLM agent to the user.
+    *   Created specialized error handling for authentication failures.

@@ -16,7 +16,8 @@ describe('OpenAI Image Generation Skill Handler', () => {
     // The moduleNameMapper in jest.config.js should handle redirecting 'openai'
     // imports within handler.js to our mock in setupMocks.js
     const module = await import('../handler.js');
-    handler = module.handler;
+    // CommonJS handler.js exports via module.exports, which appears as `default`
+    handler = module.default.runtime.handler;
   });
 
   // Reset mocks and environment variables before each test

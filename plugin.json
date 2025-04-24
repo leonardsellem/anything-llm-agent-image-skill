@@ -1,10 +1,10 @@
 {
-  "schema_version": "v1",
-  "name_for_human": "OpenAI Image Generation",
-  "name_for_model": "openai_image_generation",
-  "description_for_human": "Generate or edit images via OpenAI ‘gpt-image-1’.",
-  "description_for_model": "Use this to create or edit images. Always return the base64 string.",
   "hubId": "openai-image-generation",
+  "schema": "skill-1.0.0",
+  "version": "0.1.0",
+  "active": true,
+  "name": "OpenAI Image Generation",
+  "description": "Generate or edit images via OpenAI ‘gpt-image-1’.",
   "entrypoint": {
     "file": "handler.js",
     "function": "handler",

@@ -1,22 +1,28 @@
-import { jest } from '@jest/globals';
+ // CommonJS mock for the `openai` package, compatible with `require("openai")`
+// Jest globals are already available; no need to re-require them
 
 const mockGenerate = jest.fn();
 const mockEdit = jest.fn();
 const mockCreateVariation = jest.fn();
 
-// Mock the OpenAI constructor directly
-const mockOpenAI = jest.fn().mockImplementation(() => ({
-  images: {
-    generate: mockGenerate,
-    edit: mockEdit,
-    createVariation: mockCreateVariation,
-  }
-}));
+/**
+ * Mock OpenAI constructor used by handler.js (called via `new OpenAI()`).
+ * Each call returns an object with an `images` API containing our jest.fn mocks.
+ */
+function MockOpenAI () {
+  return {
+    images: {
+      generate: mockGenerate,
+      edit: mockEdit,
+      createVariation: mockCreateVariation
+    }
+  };
+}
 
-// Export the mocks and the mock constructor
-export { mockOpenAI, mockGenerate, mockEdit, mockCreateVariation };
+// Export constructor as module.exports so `require('openai')` gets it
+module.exports = MockOpenAI;
 
-// We need to export the mock constructor as the default export
-// to match how 'openai' is likely imported (import OpenAI from 'openai')
-// This is crucial for the moduleNameMapper to work correctly.
-export default mockOpenAI;
+// Also export the individual jest mock functions for tests
+module.exports.mockGenerate = mockGenerate;
+module.exports.mockEdit = mockEdit;
+module.exports.mockCreateVariation = mockCreateVariation;
