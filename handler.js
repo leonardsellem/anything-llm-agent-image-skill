@@ -5,19 +5,24 @@
 // so this file **MUST** use CommonJS exports (module.exports) and
 // **MUST** use require() to load dependencies – no ES `import` / `export`.
 
+// These requires are safe in CommonJS - they're built into Node
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
 /* ------------------------------------------------------------------ */
 /*  Singleton OpenAI client loader (lazy-require)                      */
 /* ------------------------------------------------------------------ */
 let _openaiClient = null;
-function getOpenAIClient () {
+function getOpenAIClient (apiKeyFromRuntime) {
   if (_openaiClient) return _openaiClient;
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = apiKeyFromRuntime || process.env.OPENAI_API_KEY;
   if (!apiKey) {
     // Returning an explicit error string is the recommended pattern
     // so the agent can surface it to the user.
     throw new Error(
-      "OPENAI_API_KEY is not set. Provide it in skill setup arguments."
+      "OpenAI API Key (OPENAI_API_KEY) is not configured"
     );
   }
 
@@ -57,6 +62,29 @@ async function retryOperation (fn, max = 3, baseDelay = 500) {
 /* ------------------------------------------------------------------ */
 /*  Core helper functions using OpenAI SDK                             */
 /* ------------------------------------------------------------------ */
+/**
+ * Saves an image from base64 data to the tmp directory and returns the URL
+ */
+function saveImageAndGetUrl(b64Data, operation) {
+  // Generate unique filename with timestamp and random suffix
+  const uniqueId = crypto.randomBytes(4).toString('hex');
+  const timestamp = Date.now();
+  const fileName = `${operation}_${timestamp}_${uniqueId}.png`;
+  const filePath = path.join(__dirname, 'tmp', fileName);
+  
+  // Create the directory if it doesn't exist
+  if (!fs.existsSync(path.join(__dirname, 'tmp'))) {
+    fs.mkdirSync(path.join(__dirname, 'tmp'), { recursive: true });
+  }
+  
+  // Write the image file
+  fs.writeFileSync(filePath, Buffer.from(b64Data, 'base64'));
+  
+  // Return path with prefix to help the LLM know it should include this in its response
+  const relativePath = `tmp/${fileName}`;
+  return `Image saved at: ${relativePath}`;
+}
+
 async function generateImage (openai, { prompt, size, quality, n }) {
   const rsp = await openai.images.generate({
     model: "dall-e-3",
@@ -66,7 +94,9 @@ async function generateImage (openai, { prompt, size, quality, n }) {
     n,
     response_format: "b64_json"
   });
-  return rsp.data[0].b64_json; // always return first
+  
+  // Save the first image and return its URL
+  return saveImageAndGetUrl(rsp.data[0].b64_json, 'generate');
 }
 
 async function editImage (openai, { prompt, imageBuf, maskBuf, size, n }) {
@@ -79,7 +109,8 @@ async function editImage (openai, { prompt, imageBuf, maskBuf, size, n }) {
     n,
     response_format: "b64_json"
   });
-  return rsp.data[0].b64_json;
+  
+  return saveImageAndGetUrl(rsp.data[0].b64_json, 'edit');
 }
 
 async function variationImage (openai, { imageBuf, size, n }) {
@@ -90,7 +121,8 @@ async function variationImage (openai, { imageBuf, size, n }) {
     n,
     response_format: "b64_json"
   });
-  return rsp.data[0].b64_json;
+  
+  return saveImageAndGetUrl(rsp.data[0].b64_json, 'variation');
 }
 
 /* ------------------------------------------------------------------ */
@@ -131,19 +163,19 @@ module.exports.runtime = {
         ? this.logger.bind(this)
         : console.log;
 
-    _introspect(`OpenAI Image Generation invoked (${operation})`);
+      _introspect(`OpenAI Image Generation invoked (${operation})`);
 
     /* ------------------ input validation ------------------ */
     const validOps = ["generate", "edit", "variation"];
     if (!validOps.includes(operation)) {
-      return `Error: Invalid operation "${operation}".`;
+      return `Error: Invalid operation specified: ${operation}.`;
     }
 
     const genSizes = ["1024x1024", "1792x1024", "1024x1792"];
     const editVarSizes = ["256x256", "512x512", "1024x1024"];
     const sizeSet = operation === "generate" ? genSizes : editVarSizes;
     if (!sizeSet.includes(size)) {
-      return `Error: Invalid size "${size}" for ${operation}.`;
+      return `Error: Invalid size "${size}" for operation "${operation}".`;
     }
 
     if (operation === "generate" && !["standard", "hd"].includes(quality)) {
@@ -151,21 +183,21 @@ module.exports.runtime = {
     }
 
     if (typeof n !== "number" || n < 1 || n > 4) {
-      return "Error: 'n' must be an integer between 1 and 4.";
+      return `Error: Invalid number of images 'n' (${n}).`;
     }
 
     if (["generate", "edit"].includes(operation) && !prompt) {
-      return "Error: 'prompt' is required for generate/edit.";
+      return "Error: Prompt is required for 'generate' and 'edit' operations.";
     }
 
     if (["edit", "variation"].includes(operation)) {
-      if (!image) return `Error: 'image' is required for ${operation}.`;
-      if (!isBase64(image)) return "Error: image must be base64.";
+      if (!image) return `Error: Base64 image string is required for '${operation}' operation.`;
+      if (!isBase64(image)) return `Error: Provided image for '${operation}' is not a valid base64 string.`;
     }
 
     if (operation === "edit") {
-      if (!mask) return "Error: 'mask' is required for edit.";
-      if (!isBase64(mask)) return "Error: mask must be base64.";
+      if (!mask) return "Error: Base64 mask string is required for 'edit' operation.";
+      if (!isBase64(mask)) return "Error: Provided mask for 'edit' is not a valid base64 string.";
     }
     /* --------------- end validation ----------------------- */
 
@@ -174,7 +206,7 @@ module.exports.runtime = {
     const maskBuf = mask ? Buffer.from(mask, "base64") : undefined;
 
     try {
-      const openai = getOpenAIClient();
+      const openai = getOpenAIClient(this?.runtimeArgs?.OPENAI_API_KEY);
 
       switch (operation) {
         case "generate":
@@ -196,12 +228,19 @@ module.exports.runtime = {
           return "Error: unreachable operation.";
       }
     } catch (e) {
-      const msg =
-        e.response?.data?.error?.message ||
-        e.message ||
-        String(e);
-      _log(`OpenAI image op failed: ${msg}`);
-      return `Error: ${msg}`;
+      const errorDetails = e.response?.data?.error?.message || e.message || String(e);
+      _log(`OpenAI image op failed: ${errorDetails}`);
+      
+      // Return a generic error message with details
+      let errorPrefix;
+      switch (operation) {
+        case "generate": errorPrefix = "Failed to generate image"; break;
+        case "edit": errorPrefix = "Failed to edit image"; break;
+        case "variation": errorPrefix = "Failed to create image variation"; break;
+        default: errorPrefix = "Failed to process image"; break;
+      }
+      
+      return `Error: ${errorPrefix}. ${errorDetails}\n\nNote: Large images are saved to disk to prevent token overflow errors.`;
     }
   }
 };

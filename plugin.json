@@ -1,15 +1,15 @@
 {
   "hubId": "openai-image-generation",
   "schema": "skill-1.0.0",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "active": true,
   "name": "OpenAI Image Generation",
-  "description": "Generate or edit images via OpenAI ‘gpt-image-1’.",
+  "description": "Generate or edit images via OpenAI DALL-E (images are saved as files to avoid token limits)",
   "entrypoint": {
     "file": "handler.js",
     "function": "handler",
     "params": {
-      "prompt": { "type": "string", "required": true, "description": "Text prompt for the image." },
+      "prompt": { "type": "string", "description": "Text prompt for the image." },
       "operation": { "type": "string", "enum": ["generate", "edit", "variation"], "default": "generate", "description": "The operation to perform: generate, edit, or variation." },
       "size": { "type": "string", "enum": ["256x256","512x512","1024x1024"], "default": "512x512", "description": "The size of the generated images." },
       "quality": { "type": "string", "enum": ["standard","hd"], "default": "standard", "description": "The quality of the image that will be generated. 'hd' creates images with finer details and greater consistency across the image." },
@@ -26,7 +26,8 @@
       "prompt": "A photorealistic image of a cat sitting on a windowsill looking out at a rainy city.",
       "operation": "generate",
       "size": "1024x1024",
-      "quality": "hd"
+      "quality": "hd",
+      "expected_response": "I've created a photorealistic image of a cat sitting on a windowsill, gazing out at a rain-soaked cityscape with tall buildings partially obscured by rainfall.\n\nImage saved at: tmp/generate_123456_example.png"
     },
     {
       "prompt": "Make the cat wear a small red hat.",
@@ -38,6 +39,13 @@
       "prompt": "Generate a variation of the original cat image.",
       "operation": "variation",
       "image": "[base64 encoded image of the cat]"
+    },
+    {
+      "prompt": "Create an image of a futuristic city with flying cars.",
+      "operation": "generate",
+      "size": "1024x1024", 
+      "quality": "standard",
+      "expected_response": "Here's your futuristic cityscape with flying vehicles soaring between sleek skyscrapers. The image captures a vibrant metropolis with advanced technology and neon lighting.\n\nImage saved at: tmp/generate_789012_example.png"
     }
   ]
 }
