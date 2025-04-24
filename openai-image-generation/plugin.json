@@ -1,0 +1,43 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "OpenAI Image Generation",
+  "name_for_model": "openai_image_generation",
+  "description_for_human": "Generate or edit images via OpenAI ‘gpt-image-1’.",
+  "description_for_model": "Use this to create or edit images. Always return the base64 string.",
+  "hubId": "openai-image-generation",
+  "entrypoint": {
+    "file": "handler.js",
+    "function": "handler",
+    "params": {
+      "prompt": { "type": "string", "required": true, "description": "Text prompt for the image." },
+      "operation": { "type": "string", "enum": ["generate", "edit", "variation"], "default": "generate", "description": "The operation to perform: generate, edit, or variation." },
+      "size": { "type": "string", "enum": ["256x256","512x512","1024x1024"], "default": "512x512", "description": "The size of the generated images." },
+      "quality": { "type": "string", "enum": ["standard","hd"], "default": "standard", "description": "The quality of the image that will be generated. 'hd' creates images with finer details and greater consistency across the image." },
+      "n": { "type": "integer", "default": 1, "minimum": 1, "maximum": 4, "description": "The number of images to generate." },
+      "image": { "type": "string", "description": "The base64 encoded PNG image to edit or create variations from. Required for 'edit' and 'variation' operations." },
+      "mask":  { "type": "string", "description": "The base64 encoded PNG mask image with transparent areas indicating where the 'image' should be edited. Required for 'edit' operation." }
+    }
+  },
+  "setup_args": {
+    "OPENAI_API_KEY": { "type": "string", "required": true, "description": "Your OpenAI API Key." }
+  },
+  "examples": [
+    {
+      "prompt": "A photorealistic image of a cat sitting on a windowsill looking out at a rainy city.",
+      "operation": "generate",
+      "size": "1024x1024",
+      "quality": "hd"
+    },
+    {
+      "prompt": "Make the cat wear a small red hat.",
+      "operation": "edit",
+      "image": "[base64 encoded image of the cat]",
+      "mask": "[base64 encoded mask highlighting the cat's head]"
+    },
+    {
+      "prompt": "Generate a variation of the original cat image.",
+      "operation": "variation",
+      "image": "[base64 encoded image of the cat]"
+    }
+  ]
+}

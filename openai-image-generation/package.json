@@ -1,0 +1,20 @@
+{
+  "name": "openai-image-generation-skill",
+  "version": "0.1.0",
+  "description": "AnythingLLM skill to generate/edit images via OpenAI API",
+  "main": "handler.js",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "openai": "^4.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
