@@ -11,9 +11,9 @@
     "params": {
       "prompt": { "type": "string", "description": "Text prompt for the image." },
       "operation": { "type": "string", "enum": ["generate", "edit", "variation"], "default": "generate", "description": "The operation to perform: generate, edit, or variation." },
-      "size": { "type": "string", "enum": ["256x256","512x512","1024x1024"], "default": "512x512", "description": "The size of the generated images." },
+      "size": { "type": "string", "enum": ["256x256","512x512","1024x1024","1792x1024","1024x1792"], "default": "512x512", "description": "The size of the generated images. DALL-E 3 supports 1024x1024, 1792x1024, 1024x1792." },
       "quality": { "type": "string", "enum": ["standard","hd"], "default": "standard", "description": "The quality of the image that will be generated. 'hd' creates images with finer details and greater consistency across the image." },
-      "n": { "type": "integer", "default": 1, "minimum": 1, "maximum": 4, "description": "The number of images to generate." },
+      "n": { "type": "number", "default": 1, "minimum": 1, "maximum": 4, "description": "The number of images to generate." },
       "image": { "type": "string", "description": "The base64 encoded PNG image to edit or create variations from. Required for 'edit' and 'variation' operations." },
       "mask":  { "type": "string", "description": "The base64 encoded PNG mask image with transparent areas indicating where the 'image' should be edited. Required for 'edit' operation." }
     }
