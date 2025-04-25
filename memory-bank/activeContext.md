@@ -12,7 +12,8 @@
     *   Added example responses to plugin.json with expected_response fields showing models how to include image paths.
     *   Fixed babel.config.js to use CommonJS exports.
 *   **Next Steps:**
-    1.  **Fix Image Path Display Issue**: The agent still doesn't include the image path in its response. Possible solutions:
+    1.  **Resolve Schema Validation Error**: The "Invalid argument schema match" error persists even after updating `plugin.json` size enum and changing `n` type to `number`. Need further investigation into the payload the LLM is sending vs. the `plugin.json` schema.
+    2.  **Fix Image Path Display Issue**: The agent still doesn't include the image path in its response. Possible solutions:
         * **Option A**: Return just the raw path (`tmp/filename.png`) with no prefix/text.
         * **Option B**: Return a JSON string with an image_path field that Anything LLM can explicitly parse.
         * **Option C**: Modify the system prompt in AnythingLLM to explicit tell the LLM to always include paths from skill responses.
