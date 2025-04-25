@@ -31,6 +31,7 @@
     *   **Linting:** ESLint (using a standard configuration like `eslint:recommended` or `airbnb-base`).
     *   **Formatting:** Prettier for consistent code style.
     *   **Testing:** Jest framework for unit testing `handler.js` logic (mocking the OpenAI API calls).
+*   **Configuration File Syntax:** Ensure all project configuration files (e.g., `jest.config.js`, `babel.config.js`, `.eslintrc.js`) use the correct module syntax matching `package.json`'s `"type"` field. For this project (`"type": "commonjs"`), use `module.exports = { ... };` and `require()`. Avoid ES Module syntax (`export default`, `import`).
 
 ### Jest Configuration for Testing CommonJS Skills with ESM Tests
 

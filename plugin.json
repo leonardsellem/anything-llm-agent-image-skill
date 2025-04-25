@@ -21,6 +21,14 @@
   "setup_args": {
     "OPENAI_API_KEY": { "type": "string", "required": true, "description": "Your OpenAI API Key." }
   },
+  "settings": [
+    { "key": "AWS_ACCESS_KEY_ID",     "type": "secret", "label": "AWS Access Key" },
+    { "key": "AWS_SECRET_ACCESS_KEY", "type": "secret", "label": "AWS Secret Key" },
+    { "key": "AWS_SESSION_TOKEN",     "type": "secret", "label": "AWS Session Token", "optional": true },
+    { "key": "AWS_REGION", "type": "text", "label": "AWS Region (e.g. eu-west-3)" },
+    { "key": "S3_BUCKET",  "type": "text", "label": "S3 Bucket Name" },
+    { "key": "SIGNED_URL_TTL", "type": "number", "label": "URL Expiry Seconds", "default": 86400 }
+  ],
   "examples": [
     {
       "prompt": "A photorealistic image of a cat sitting on a windowsill looking out at a rainy city.",

@@ -6,9 +6,13 @@
 // **MUST** use require() to load dependencies – no ES `import` / `export`.
 
 // These requires are safe in CommonJS - they're built into Node
-const fs = require('fs');
+const fs = require('fs'); // Keep for potential future use or local testing fallback
 const path = require('path');
 const crypto = require('crypto');
+
+// Lazy require AWS SDK v3 components
+let _s3Client = null;
+let S3Client, PutObjectCommand, GetObjectCommand, getSignedUrl;
 
 /* ------------------------------------------------------------------ */
 /*  Singleton OpenAI client loader (lazy-require)                      */
@@ -31,6 +35,49 @@ function getOpenAIClient (apiKeyFromRuntime) {
   _openaiClient = new OpenAI({ apiKey });
   return _openaiClient;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Singleton S3 client loader (lazy-require)                          */
+/* ------------------------------------------------------------------ */
+function getS3Client(runtimeArgs) {
+  if (_s3Client) return _s3Client;
+
+  // Load AWS SDK components if not already loaded
+  if (!S3Client) {
+    ({ S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3"));
+    ({ getSignedUrl } = require("@aws-sdk/s3-request-presigner"));
+  }
+
+  const {
+    AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY,
+    AWS_SESSION_TOKEN, // Optional
+    AWS_REGION,
+    S3_BUCKET // We need bucket name here for validation, though client doesn't strictly need it
+  } = runtimeArgs || {};
+
+  if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY || !AWS_REGION || !S3_BUCKET) {
+    throw new Error(
+      "Missing required AWS S3 configuration in skill settings: Access Key ID, Secret Key, Region, and Bucket Name are required."
+    );
+  }
+
+  const credentials = {
+    accessKeyId: AWS_ACCESS_KEY_ID,
+    secretAccessKey: AWS_SECRET_ACCESS_KEY,
+  };
+  if (AWS_SESSION_TOKEN) {
+    credentials.sessionToken = AWS_SESSION_TOKEN;
+  }
+
+  _s3Client = new S3Client({
+    region: AWS_REGION,
+    credentials,
+  });
+
+  return _s3Client;
+}
+
 
 /* ------------------------------------------------------------------ */
 /*  Helper: simple retry for transient errors (≥5xx / network codes)   */
@@ -63,43 +110,63 @@ async function retryOperation (fn, max = 3, baseDelay = 500) {
 /*  Core helper functions using OpenAI SDK                             */
 /* ------------------------------------------------------------------ */
 /**
- * Saves an image from base64 data to the tmp directory and returns the URL
+ * Uploads image buffer to S3 and returns a pre-signed URL in Markdown format.
  */
-function saveImageAndGetUrl(b64Data, operation) {
-  // Generate unique filename with timestamp and random suffix
-  const uniqueId = crypto.randomBytes(4).toString('hex');
+async function uploadImageAndGetSignedUrl(
+  s3Client,
+  { bucket, region, ttlSeconds, imageBuffer, operation }
+) {
+  // Generate unique S3 key
+  const uniqueId = crypto.randomBytes(8).toString('hex');
   const timestamp = Date.now();
-  const fileName = `${operation}_${timestamp}_${uniqueId}.png`;
-  const filePath = path.join(__dirname, 'tmp', fileName);
-  
-  // Create the directory if it doesn't exist
-  if (!fs.existsSync(path.join(__dirname, 'tmp'))) {
-    fs.mkdirSync(path.join(__dirname, 'tmp'), { recursive: true });
-  }
-  
-  // Write the image file
-  fs.writeFileSync(filePath, Buffer.from(b64Data, 'base64'));
-  
-  // Return path with prefix to help the LLM know it should include this in its response
-  const relativePath = `tmp/${fileName}`;
-  return `Image saved at: ${relativePath}`;
+  const key = `images/${operation}_${timestamp}_${uniqueId}.png`;
+
+  // 1. Upload to S3
+  const putCommand = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: imageBuffer,
+    ContentType: 'image/png', // Assuming PNG format from OpenAI
+  });
+  await s3Client.send(putCommand);
+  console.log(`Successfully uploaded ${key} to s3://${bucket}`);
+
+  // 2. Generate pre-signed URL
+  const getCommand = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
+  const signedUrl = await getSignedUrl(s3Client, getCommand, {
+    expiresIn: ttlSeconds, // TTL in seconds
+  });
+  console.log(`Generated pre-signed URL (expires in ${ttlSeconds}s): ${signedUrl}`);
+
+  // 3. Return Markdown formatted URL
+  // Use a generic alt text as the specific prompt might be too long/complex
+  const altText = `${operation} image`;
+  return `![${altText}](${signedUrl})`;
 }
 
-async function generateImage (openai, { prompt, size, quality, n }) {
+
+async function generateImage (openai, s3Client, s3Config, { prompt, size, quality, n }) {
   const rsp = await openai.images.generate({
     model: "dall-e-3",
     prompt,
     size,
     quality,
     n,
-    response_format: "b64_json"
+    response_format: "b64_json", // Request base64 data
   });
-  
-  // Save the first image and return its URL
-  return saveImageAndGetUrl(rsp.data[0].b64_json, 'generate');
+
+  const imageBuffer = Buffer.from(rsp.data[0].b64_json, 'base64');
+  return uploadImageAndGetSignedUrl(s3Client, {
+    ...s3Config,
+    imageBuffer,
+    operation: 'generate',
+  });
 }
 
-async function editImage (openai, { prompt, imageBuf, maskBuf, size, n }) {
+async function editImage (openai, s3Client, s3Config, { prompt, imageBuf, maskBuf, size, n }) {
   const rsp = await openai.images.edit({
     model: "dall-e-2",
     prompt,
@@ -107,22 +174,32 @@ async function editImage (openai, { prompt, imageBuf, maskBuf, size, n }) {
     mask: maskBuf,
     size,
     n,
-    response_format: "b64_json"
+    response_format: "b64_json",
   });
-  
-  return saveImageAndGetUrl(rsp.data[0].b64_json, 'edit');
+
+  const imageBuffer = Buffer.from(rsp.data[0].b64_json, 'base64');
+  return uploadImageAndGetSignedUrl(s3Client, {
+    ...s3Config,
+    imageBuffer,
+    operation: 'edit',
+  });
 }
 
-async function variationImage (openai, { imageBuf, size, n }) {
+async function variationImage (openai, s3Client, s3Config, { imageBuf, size, n }) {
   const rsp = await openai.images.createVariation({
     model: "dall-e-2",
     image: imageBuf,
     size,
     n,
-    response_format: "b64_json"
+    response_format: "b64_json",
   });
-  
-  return saveImageAndGetUrl(rsp.data[0].b64_json, 'variation');
+
+  const imageBuffer = Buffer.from(rsp.data[0].b64_json, 'base64');
+  return uploadImageAndGetSignedUrl(s3Client, {
+    ...s3Config,
+    imageBuffer,
+    operation: 'variation',
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -149,7 +226,7 @@ module.exports.runtime = {
     quality = "standard",
     n = 1,
     image,
-    mask
+    mask,
   }) {
     /* ---------------------------------------------------------- */
     /*  Safe helpers when this.introspect / this.logger missing   */
@@ -161,11 +238,32 @@ module.exports.runtime = {
     const _log =
       typeof this === "object" && typeof this.logger === "function"
         ? this.logger.bind(this)
-        : console.log;
+        : console.log; // Fallback to console.log
 
-      _introspect(`OpenAI Image Generation invoked (${operation})`);
+    _introspect(`OpenAI Image Generation invoked (${operation})`);
 
-    /* ------------------ input validation ------------------ */
+    /* ------------------ AWS Settings Validation ------------- */
+    const {
+      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, // Optional
+      AWS_REGION, S3_BUCKET,
+      SIGNED_URL_TTL = 86400 // Default TTL = 1 day (in seconds)
+    } = this?.runtimeArgs || {};
+
+    if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY || !AWS_REGION || !S3_BUCKET) {
+      return "Error: Missing required AWS S3 configuration in skill settings. Please configure Access Key ID, Secret Key, Region, and Bucket Name.";
+    }
+    if (typeof SIGNED_URL_TTL !== 'number' || SIGNED_URL_TTL <= 0) {
+       return "Error: Invalid 'URL Expiry Seconds' setting. Must be a positive number.";
+    }
+    const s3Config = {
+      bucket: S3_BUCKET,
+      region: AWS_REGION,
+      ttlSeconds: SIGNED_URL_TTL,
+    };
+    _introspect(`Using S3 config: bucket=${s3Config.bucket}, region=${s3Config.region}, ttl=${s3Config.ttlSeconds}s`);
+
+
+    /* ------------------ OpenAI Input Validation ------------- */
     const validOps = ["generate", "edit", "variation"];
     if (!validOps.includes(operation)) {
       return `Error: Invalid operation specified: ${operation}.`;
@@ -206,41 +304,51 @@ module.exports.runtime = {
     const maskBuf = mask ? Buffer.from(mask, "base64") : undefined;
 
     try {
+      // Initialize clients (OpenAI client uses API key from setup_args)
       const openai = getOpenAIClient(this?.runtimeArgs?.OPENAI_API_KEY);
+      const s3Client = getS3Client(this?.runtimeArgs); // Uses settings
 
       switch (operation) {
         case "generate":
           return await retryOperation(() =>
-            generateImage(openai, { prompt, size, quality, n })
+            generateImage(openai, s3Client, s3Config, { prompt, size, quality, n })
           );
 
         case "edit":
           return await retryOperation(() =>
-            editImage(openai, { prompt, imageBuf, maskBuf, size, n })
+            editImage(openai, s3Client, s3Config, { prompt, imageBuf, maskBuf, size, n })
           );
 
         case "variation":
           return await retryOperation(() =>
-            variationImage(openai, { imageBuf, size, n })
+            variationImage(openai, s3Client, s3Config, { imageBuf, size, n })
           );
 
         default:
-          return "Error: unreachable operation.";
+          // Should be caught by validation, but good practice to have default
+          return "Error: Invalid operation specified.";
       }
     } catch (e) {
+      // Log the full error internally for debugging
       const errorDetails = e.response?.data?.error?.message || e.message || String(e);
-      _log(`OpenAI image op failed: ${errorDetails}`);
-      
-      // Return a generic error message with details
-      let errorPrefix;
-      switch (operation) {
-        case "generate": errorPrefix = "Failed to generate image"; break;
-        case "edit": errorPrefix = "Failed to edit image"; break;
-        case "variation": errorPrefix = "Failed to create image variation"; break;
-        default: errorPrefix = "Failed to process image"; break;
+      _log(`Skill execution failed: ${errorDetails}`);
+      _log(e.stack); // Log stack trace if available
+
+      // Return a user-friendly error message
+      // Avoid exposing raw internal details like stack traces to the user
+      let userErrorMessage = "An error occurred while processing the image request.";
+      if (errorDetails.includes("configuration in skill settings")) {
+        userErrorMessage = errorDetails; // Pass validation errors through
+      } else if (errorDetails.includes("credentials")) {
+         userErrorMessage = "Error: Invalid AWS credentials provided in skill settings.";
+      } else if (e.code === 'NoSuchBucket' || errorDetails.includes('NoSuchBucket')) {
+         userErrorMessage = `Error: The specified S3 bucket "${s3Config.bucket}" does not exist or cannot be accessed.`;
+      } else if (e.code === 'AccessDenied' || errorDetails.includes('AccessDenied')) {
+         userErrorMessage = `Error: Access denied when trying to access S3 bucket "${s3Config.bucket}". Check IAM permissions.`;
       }
-      
-      return `Error: ${errorPrefix}. ${errorDetails}\n\nNote: Large images are saved to disk to prevent token overflow errors.`;
+      // Add more specific S3 error checks if needed
+
+      return `Error: ${userErrorMessage}`;
     }
   }
 };

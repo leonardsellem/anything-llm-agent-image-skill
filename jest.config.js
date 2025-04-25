@@ -1,4 +1,4 @@
-export default {
+module.exports = {
   testEnvironment: 'node',
   // Explicitly tell Babel Jest how to find the config
   transform: {

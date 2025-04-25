@@ -41,3 +41,4 @@
     *   Handled OpenAI SDK errors (e.g., network issues, authentication errors, invalid requests, rate limits).
     *   Formatted caught errors into user-friendly string messages that can be surfaced by the AnythingLLM agent to the user.
     *   Created specialized error handling for authentication failures.
+    *   **Handler Error Formatting:** When the `handler.js` catches errors, format the returned error string consistently. Start with `"Error: "` followed by a user-friendly message. Avoid nesting or doubling the "Error: " prefix. Log more detailed technical information (like stack traces or specific API error codes) internally using `_log` or `console.error`, but do not expose these raw details in the string returned to the agent/user unless absolutely necessary for debugging configuration issues (like missing settings).
