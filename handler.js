@@ -39,7 +39,7 @@ function getOpenAIClient (apiKeyFromRuntime) {
 /* ------------------------------------------------------------------ */
 /*  Singleton S3 client loader (lazy-require)                          */
 /* ------------------------------------------------------------------ */
-function getS3Client(runtimeArgs) {
+function getS3Client() { // Removed runtimeArgs parameter
   if (_s3Client) return _s3Client;
 
   // Load AWS SDK components if not already loaded
@@ -48,17 +48,18 @@ function getS3Client(runtimeArgs) {
     ({ getSignedUrl } = require("@aws-sdk/s3-request-presigner"));
   }
 
+  // Read directly from environment variables
   const {
     AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY,
     AWS_SESSION_TOKEN, // Optional
     AWS_REGION,
-    S3_BUCKET // We need bucket name here for validation, though client doesn't strictly need it
-  } = runtimeArgs || {};
+    S3_BUCKET // Still useful to check here
+  } = process.env;
 
   if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY || !AWS_REGION || !S3_BUCKET) {
     throw new Error(
-      "Missing required AWS S3 configuration in skill settings: Access Key ID, Secret Key, Region, and Bucket Name are required."
+      "Missing required AWS S3 configuration in environment variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, and S3_BUCKET are required."
     );
   }
 
@@ -242,25 +243,28 @@ module.exports.runtime = {
 
     _introspect(`OpenAI Image Generation invoked (${operation})`);
 
-    /* ------------------ AWS Settings Validation ------------- */
-    const {
-      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, // Optional
-      AWS_REGION, S3_BUCKET,
-      SIGNED_URL_TTL = 86400 // Default TTL = 1 day (in seconds)
-    } = this?.runtimeArgs || {};
+    /* ------------------ AWS Config from Environment ------------- */
+    // Read S3 config directly from environment variables for use in upload helper
+    const s3BucketFromEnv = process.env.S3_BUCKET;
+    const awsRegionFromEnv = process.env.AWS_REGION; // Needed for config, though client gets it too
+    const signedUrlTtlFromEnv = parseInt(process.env.SIGNED_URL_TTL || '86400', 10); // Default 1 day
 
-    if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY || !AWS_REGION || !S3_BUCKET) {
-      return "Error: Missing required AWS S3 configuration in skill settings. Please configure Access Key ID, Secret Key, Region, and Bucket Name.";
+    // Basic validation for env vars needed by the handler logic itself
+    if (!s3BucketFromEnv || !awsRegionFromEnv) {
+      // Note: getS3Client performs more thorough validation for client credentials
+      return "Error: Missing required AWS environment variables: S3_BUCKET and AWS_REGION.";
     }
-    if (typeof SIGNED_URL_TTL !== 'number' || SIGNED_URL_TTL <= 0) {
-       return "Error: Invalid 'URL Expiry Seconds' setting. Must be a positive number.";
-    }
+     if (isNaN(signedUrlTtlFromEnv) || signedUrlTtlFromEnv <= 0) {
+       return "Error: Invalid SIGNED_URL_TTL environment variable. Must be a positive number.";
+     }
+
     const s3Config = {
-      bucket: S3_BUCKET,
-      region: AWS_REGION,
-      ttlSeconds: SIGNED_URL_TTL,
+      bucket: s3BucketFromEnv,
+      region: awsRegionFromEnv, // Include region here for clarity/consistency
+      ttlSeconds: signedUrlTtlFromEnv,
     };
-    _introspect(`Using S3 config: bucket=${s3Config.bucket}, region=${s3Config.region}, ttl=${s3Config.ttlSeconds}s`);
+    _introspect(`Using S3 config from env: bucket=${s3Config.bucket}, region=${s3Config.region}, ttl=${s3Config.ttlSeconds}s`);
+    /* --------------- end AWS Config ----------------------- */
 
 
     /* ------------------ OpenAI Input Validation ------------- */
@@ -304,9 +308,10 @@ module.exports.runtime = {
     const maskBuf = mask ? Buffer.from(mask, "base64") : undefined;
 
     try {
-      // Initialize clients (OpenAI client uses API key from setup_args)
+      // Initialize clients (OpenAI client uses API key from setup_args or env)
       const openai = getOpenAIClient(this?.runtimeArgs?.OPENAI_API_KEY);
-      const s3Client = getS3Client(this?.runtimeArgs); // Uses settings
+      // S3 client now reads credentials directly from environment variables
+      const s3Client = getS3Client();
 
       switch (operation) {
         case "generate":
@@ -337,14 +342,15 @@ module.exports.runtime = {
       // Return a user-friendly error message
       // Avoid exposing raw internal details like stack traces to the user
       let userErrorMessage = "An error occurred while processing the image request.";
-      if (errorDetails.includes("configuration in skill settings")) {
+      // Update error messages to refer to environment variables
+      if (errorDetails.includes("configuration in environment variables")) {
         userErrorMessage = errorDetails; // Pass validation errors through
       } else if (errorDetails.includes("credentials")) {
-         userErrorMessage = "Error: Invalid AWS credentials provided in skill settings.";
+         userErrorMessage = "Error: Invalid AWS credentials provided in environment variables.";
       } else if (e.code === 'NoSuchBucket' || errorDetails.includes('NoSuchBucket')) {
-         userErrorMessage = `Error: The specified S3 bucket "${s3Config.bucket}" does not exist or cannot be accessed.`;
+         userErrorMessage = `Error: The specified S3 bucket "${s3Config.bucket}" (from S3_BUCKET env var) does not exist or cannot be accessed.`;
       } else if (e.code === 'AccessDenied' || errorDetails.includes('AccessDenied')) {
-         userErrorMessage = `Error: Access denied when trying to access S3 bucket "${s3Config.bucket}". Check IAM permissions.`;
+         userErrorMessage = `Error: Access denied when trying to access S3 bucket "${s3Config.bucket}" (from S3_BUCKET env var). Check IAM permissions.`;
       }
       // Add more specific S3 error checks if needed
 
